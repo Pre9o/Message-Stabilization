@@ -82,8 +82,8 @@ public class StableMulticast {
                 }
             }
         }
-
         localMatrix[memberIndex][memberIndex]++;
+        printState();
     }
 
     // Envio unicast com exibição de confirmação
@@ -179,15 +179,46 @@ public class StableMulticast {
                 socket.receive(packet);
                 Message m = Message.fromBytes(packet.getData(), packet.getLength());
                 if (m != null) {
-                    buffer.add(m);
                     int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
-                    if (senderIdx != -1 && m.vector != null && m.vector.length == localMatrix.length) {
-                        localMatrix[senderIdx] = Arrays.copyOf(m.vector, m.vector.length);
+                    if (senderIdx == memberIndex) {
+                        continue;
                     }
-                    tryDeliver();
+                    buffer.add(m);
+                    if (senderIdx != -1 && m.vector != null && m.vector.length == localMatrix.length) {
+                        // MCi[j][*] <- msg.VC (atualiza visão do Pi com visão de Pj)
+                        for (int k = 0; k < localMatrix.length; k++) {
+                            localMatrix[senderIdx][k] = m.vector[k];
+                        }
+                        // if i != j then MCi[i][j] <- MCi[i][j]+1
+                        if (memberIndex != senderIdx) {
+                            localMatrix[memberIndex][senderIdx]++;
+                        }
+                    }
+                    client.deliver(m.msg);
+                    discardDeliveredMessages();
+                    printState();
                 }
             }
         } catch (Exception e) { /* ignore */ }
+    }
+
+    private void discardDeliveredMessages() {
+        synchronized (buffer) {
+            Iterator<Message> it = buffer.iterator();
+            while (it.hasNext()) {
+                Message m = it.next();
+                int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
+                if (senderIdx == -1) continue;
+                int min = Integer.MAX_VALUE;
+                for (int x = 0; x < localMatrix.length; x++) {
+                    min = Math.min(min, localMatrix[x][senderIdx]);
+                }
+                if (m.vector[senderIdx] <= min) {
+                    System.out.println("Descartando mensagem de " + m.senderIp + ":" + m.senderPort + " | Msg: " + m.msg);
+                    it.remove(); 
+                }
+            }
+        }
     }
 
     private void tryDeliver() {
