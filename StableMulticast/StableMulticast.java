@@ -1,6 +1,7 @@
 package StableMulticast;
 
 import java.net.*;
+import java.sql.SQLOutput;
 import java.util.*;
 import java.util.concurrent.*;
 import java.io.*;
@@ -138,28 +139,35 @@ public class StableMulticast {
     private void updateMemberIndex() {
         List<Member> sorted = new ArrayList<>(group);
         sorted.sort(Comparator.comparing(Member::toString));
-        int oldIndex = memberIndex;
-        int oldSize = localMatrix != null ? localMatrix.length : 0;
+        int newIndex = -1;
         for (int i = 0; i < sorted.size(); i++) {
             if (sorted.get(i).equals(new Member(localIp, localPort))) {
-                memberIndex = i;
+                newIndex = i;
                 break;
             }
         }
+        memberIndex = newIndex;
         int n = sorted.size();
-        if (localMatrix == null || localMatrix.length != n) {
+        boolean matrizNova = (localMatrix == null);
+        if (matrizNova || localMatrix.length != n) {
             int[][] newMatrix = new int[n][n];
             for (int i = 0; i < n; i++)
                 Arrays.fill(newMatrix[i], -1);
-            if (localMatrix != null) {
+            if (!matrizNova) {
                 for (int i = 0; i < Math.min(localMatrix.length, n); i++)
                     System.arraycopy(localMatrix[i], 0, newMatrix[i], 0, Math.min(localMatrix[i].length, n));
             }
             localMatrix = newMatrix;
         }
-        // Só inicializa a célula do processo local se ela estiver -1
+
         if (localMatrix[memberIndex][memberIndex] == -1) {
+            System.out.println("Inicializando relógio lógico para o processo local " + memberIndex);
             localMatrix[memberIndex][memberIndex] = 0;
+            if (memberIndex > 0) {
+                for (int i = memberIndex - 1; i >= 0; i--) {
+                    localMatrix[i][i] = -1;
+                }
+            }
         }
     }
 
