@@ -31,7 +31,7 @@ public class TesteCliente implements IStableMulticast {
             System.out.println("Uso: java TesteCliente <ip_local> <porta_local>");
         }
         Scanner scanner = new Scanner(System.in);
-        String ip = scanner.nextLine();
+        String ip = "127.0.0.1";
         int port = scanner.nextInt();
         TesteCliente cliente = new TesteCliente(ip, port);
         cliente.start();

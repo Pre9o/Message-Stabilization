@@ -29,6 +29,7 @@ public class StableMulticast {
         this.localIp = ip;
         this.localPort = port;
         this.client = client;
+        group.add(new Member(localIp, localPort));
         // Descoberta de membros
         new Thread(this::discoveryService).start();
         // Recepção de mensagens
@@ -134,10 +135,8 @@ public class StableMulticast {
         } catch (Exception e) { /* ignore */ }
     }
 
-    // Atualiza o índice do membro local no vetor/matriz
     private void updateMemberIndex() {
         List<Member> sorted = new ArrayList<>(group);
-        sorted.add(new Member(localIp, localPort));
         sorted.sort(Comparator.comparing(Member::toString));
         int oldIndex = memberIndex;
         int oldSize = localMatrix != null ? localMatrix.length : 0;
@@ -158,8 +157,10 @@ public class StableMulticast {
             }
             localMatrix = newMatrix;
         }
-        if (localMatrix[memberIndex][memberIndex] == -1)
+        // Só inicializa a célula do processo local se ela estiver -1
+        if (localMatrix[memberIndex][memberIndex] == -1) {
             localMatrix[memberIndex][memberIndex] = 0;
+        }
     }
 
     private void receiveService() {
@@ -215,11 +216,23 @@ public class StableMulticast {
     private boolean isDeliverable(Message m) {
         int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
         if (senderIdx == -1) return false;
-        return true; 
-    }
+        for (int k = 0; k < localMatrix.length; k++) {
+            if (k == senderIdx) continue;
+            if (localMatrix[memberIndex][k] < m.vector[k]) {
+                return false;
+            }
+        }
+        if (localMatrix[memberIndex][senderIdx] != m.vector[senderIdx] - 1) {
+            return false;
+        }
+    return true;
+}
 
     private void updateVector(Message m) {
-    }
+        int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
+        if (senderIdx == -1) return;
+        localMatrix[memberIndex][senderIdx] = m.vector[senderIdx];
+}
 
     private void sendUnicast(Member member, Message m) {
         try (DatagramSocket socket = new DatagramSocket()) {
@@ -232,7 +245,6 @@ public class StableMulticast {
 
     private int getMemberIndex(String ip, int port) {
         List<Member> sorted = new ArrayList<>(group);
-        sorted.add(new Member(localIp, localPort));
         sorted.sort(Comparator.comparing(Member::toString));
         for (int i = 0; i < sorted.size(); i++) {
             if (sorted.get(i).equals(new Member(ip, port))) return i;
