@@ -26,15 +26,21 @@ public class StableMulticast {
 
     private final Scanner scanner = new Scanner(System.in);
 
+    private final Map<Member, Long> lastSeen = new ConcurrentHashMap<>();
+    private final long memberTimeout = 6000; 
+
     public StableMulticast(String ip, Integer port, IStableMulticast client) {
         this.localIp = ip;
         this.localPort = port;
         this.client = client;
         group.add(new Member(localIp, localPort));
+        lastSeen.put(new Member(localIp, localPort), System.currentTimeMillis());
         // Descoberta de membros
         new Thread(this::discoveryService).start();
         // Recepção de mensagens
         new Thread(this::receiveService).start();
+        // Thread para monitorar membros ausentes
+        new Thread(this::memberTimeoutService).start();
     }
 
     public void msend(String msg, IStableMulticast client) {
@@ -86,7 +92,6 @@ public class StableMulticast {
         printState();
     }
 
-    // Envio unicast com exibição de confirmação
     private void sendUnicastWithPrompt(Member member, Message m, boolean prompt) {
         if (prompt) {
             System.out.print("Enviar para " + member + "? (s/n): ");
@@ -130,10 +135,82 @@ public class StableMulticast {
                     int port = Integer.parseInt(parts[1]);
                     Member m = new Member(ip, port);
                     group.add(m);
+                    lastSeen.put(m, System.currentTimeMillis()); // Atualiza último anúncio
                     updateMemberIndex();
                 }
             }
         } catch (Exception e) { /* ignore */ }
+    }
+
+    private void memberTimeoutService() {
+        while (running) {
+            try {
+                long now = System.currentTimeMillis();
+                List<Member> toRemove = new ArrayList<>();
+                for (Member m : group) {
+                    if (m.equals(new Member(localIp, localPort))) continue;
+                    Long seen = lastSeen.get(m);
+                    if (seen == null || now - seen > memberTimeout) {
+                        toRemove.add(m);
+                    }
+                }
+                if (!toRemove.isEmpty()) {
+                    for (Member m : toRemove) {
+                        System.out.println("Removendo membro ausente: " + m);
+                        group.remove(m);
+                        lastSeen.remove(m);
+                        removeMemberFromMatrix(m);
+                        removeMessagesFromBuffer(m);
+                    }
+                    updateMemberIndex();
+                    printState();
+                }
+                Thread.sleep(1000);
+            } catch (Exception e) { /* ignore */ }
+        }
+    }
+
+    private void removeMemberFromMatrix(Member m) {
+        List<Member> sorted = new ArrayList<>(group);
+        sorted.sort(Comparator.comparing(Member::toString));
+        int idx = -1;
+        for (int i = 0; i < sorted.size() + 1; i++) { 
+            if (i < sorted.size() && sorted.get(i).equals(m)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == -1 && localMatrix != null && localMatrix.length > 1) {
+            List<Member> oldSorted = new ArrayList<>(group);
+            oldSorted.add(m);
+            oldSorted.sort(Comparator.comparing(Member::toString));
+            for (int i = 0; i < oldSorted.size(); i++) {
+                if (oldSorted.get(i).equals(m)) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        if (idx != -1 && localMatrix != null && localMatrix.length > 1) {
+            int n = localMatrix.length;
+            int[][] newMatrix = new int[n - 1][n - 1];
+            for (int i = 0, ni = 0; i < n; i++) {
+                if (i == idx) continue;
+                for (int j = 0, nj = 0; j < n; j++) {
+                    if (j == idx) continue;
+                    newMatrix[ni][nj] = localMatrix[i][j];
+                    nj++;
+                }
+                ni++;
+            }
+            localMatrix = newMatrix;
+        }
+    }
+
+    private void removeMessagesFromBuffer(Member m) {
+        synchronized (buffer) {
+            buffer.removeIf(msg -> msg.senderIp.equals(m.ip) && msg.senderPort == m.port);
+        }
     }
 
     private void updateMemberIndex() {
