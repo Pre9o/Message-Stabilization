@@ -29,10 +29,10 @@ public class TesteCliente implements IStableMulticast {
     public static void main(String[] args) {
         if (args.length < 2) {
             System.out.println("Uso: java TesteCliente <ip_local> <porta_local>");
+            return;
         }
-        Scanner scanner = new Scanner(System.in);
-        String ip = "127.0.0.1";
-        int port = scanner.nextInt();
+        String ip = args[0];
+        int port = Integer.parseInt(args[1]);
         TesteCliente cliente = new TesteCliente(ip, port);
         cliente.start();
     }

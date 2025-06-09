@@ -7,7 +7,7 @@ import java.util.concurrent.*;
 import java.io.*;
 
 public class StableMulticast {
-    private final String multicastIp = "230.0.0.1";
+    private final String multicastIp = "230.0.0.0";
     private final int multicastPort = 4446;
     private final int bufferSize = 1024;
     private final int discoveryInterval = 2000;
