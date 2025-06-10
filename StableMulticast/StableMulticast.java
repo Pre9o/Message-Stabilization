@@ -43,6 +43,21 @@ public class StableMulticast {
     }
 
     public void msend(String msg, IStableMulticast client) {
+        // Verifica se há apenas um membro (o próprio processo)
+        List<Member> otherMembers = new ArrayList<>();
+        for (Member member : group) {
+            if (!member.equals(new Member(localIp, localPort))) {
+                otherMembers.add(member);
+            }
+        }
+        
+        if (otherMembers.isEmpty()) {
+            System.out.println("Apenas um membro no grupo. Relógio lógico permanece zerado e buffer vazio.");
+            // Não incrementa o relógio lógico nem adiciona ao buffer
+            printState();
+            return;
+        }
+
         int[] myRow = Arrays.copyOf(localMatrix[memberIndex], localMatrix.length);
         Message m = new Message(localIp, localPort, myRow, msg);
 
@@ -50,23 +65,18 @@ public class StableMulticast {
 
         printState();
 
-        List<Member> memberList = new ArrayList<>(group);
-        if (memberList.isEmpty()) {
-            System.out.println("Nenhum membro para enviar.");
-            return;
-        }
         System.out.println("Enviar mensagem para TODOS os membros? (s/n)");
         String opt = scanner.nextLine().trim().toLowerCase();
         if (opt.equals("s")) {
-            for (Member member : memberList) {
+            for (Member member : otherMembers) {
                 sendUnicastWithPrompt(member, m, false);
             }
         } else {
             Set<Member> enviados = new HashSet<>();
-            while (enviados.size() < memberList.size()) {
+            while (enviados.size() < otherMembers.size()) {
                 System.out.println("Membros disponíveis:");
-                for (int i = 0; i < memberList.size(); i++) {
-                    Member mem = memberList.get(i);
+                for (int i = 0; i < otherMembers.size(); i++) {
+                    Member mem = otherMembers.get(i);
                     if (!enviados.contains(mem)) {
                         System.out.println(i + ": " + mem);
                     }
@@ -76,11 +86,11 @@ public class StableMulticast {
                 if (entrada.equalsIgnoreCase("fim")) break;
                 try {
                     int idx = Integer.parseInt(entrada);
-                    if (idx >= 0 && idx < memberList.size() && !enviados.contains(memberList.get(idx))) {
-                        sendUnicastWithPrompt(memberList.get(idx), m, true);
-                        enviados.add(memberList.get(idx));
+                    if (idx >= 0 && idx < otherMembers.size() && !enviados.contains(otherMembers.get(idx))) {
+                        sendUnicastWithPrompt(otherMembers.get(idx), m, true);
+                        enviados.add(otherMembers.get(idx));
                     } else {
-                        System.out.println("Índice inválido ou já enviado.");
+                        System.out.println("Indice inválido ou já enviado.");
                     }
                 } catch (NumberFormatException e) {
                     System.out.println("Entrada inválida.");
