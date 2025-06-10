@@ -1,13 +1,12 @@
 package StableMulticast;
 
 import java.net.*;
-import java.sql.SQLOutput;
 import java.util.*;
 import java.util.concurrent.*;
 import java.io.*;
 
 public class StableMulticast {
-    private final String multicastIp = "230.0.0.0";
+    private final String multicastIp = "230.0.0.1";
     private final int multicastPort = 4446;
     private final int bufferSize = 1024;
     private final int discoveryInterval = 2000;
@@ -254,26 +253,33 @@ public class StableMulticast {
                 byte[] buf = new byte[bufferSize];
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 socket.receive(packet);
-                Message m = Message.fromBytes(packet.getData(), packet.getLength());
-                if (m != null) {
-                    int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
-                    if (senderIdx == memberIndex) {
-                        continue;
-                    }
-                    buffer.add(m);
-                    if (senderIdx != -1 && m.vector != null && m.vector.length == localMatrix.length) {
-                        // MCi[j][*] <- msg.VC (atualiza visão do Pi com visão de Pj)
-                        for (int k = 0; k < localMatrix.length; k++) {
-                            localMatrix[senderIdx][k] = m.vector[k];
+                
+                try (ByteArrayInputStream byteStream = new ByteArrayInputStream(packet.getData(), 0, packet.getLength());
+                     ObjectInputStream in = new ObjectInputStream(byteStream)) {
+                    
+                    Message m = (Message) in.readObject();
+                    if (m != null) {
+                        int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
+                        if (senderIdx == memberIndex) {
+                            continue;
                         }
-                        // if i != j then MCi[i][j] <- MCi[i][j]+1
-                        if (memberIndex != senderIdx) {
-                            localMatrix[memberIndex][senderIdx]++;
+                        buffer.add(m);
+                        if (senderIdx != -1 && m.vector != null && m.vector.length == localMatrix.length) {
+                            // MCi[j][*] <- msg.VC (atualiza visão do Pi com visão de Pj)
+                            for (int k = 0; k < localMatrix.length; k++) {
+                                localMatrix[senderIdx][k] = m.vector[k];
+                            }
+                            // if i != j then MCi[i][j] <- MCi[i][j]+1
+                            if (memberIndex != senderIdx) {
+                                localMatrix[memberIndex][senderIdx]++;
+                            }
                         }
+                        client.deliver(m.msg);
+                        discardDeliveredMessages();
+                        printState();
                     }
-                    client.deliver(m.msg);
-                    discardDeliveredMessages();
-                    printState();
+                } catch (IOException | ClassNotFoundException e) {
+                    System.err.println("Error deserializing message: " + e.getMessage());
                 }
             }
         } catch (Exception e) { /* ignore */ }
@@ -351,11 +357,19 @@ public class StableMulticast {
 }
 
     private void sendUnicast(Member member, Message m) {
-        try (DatagramSocket socket = new DatagramSocket()) {
-            byte[] data = m.toBytes();
+        try (ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+             ObjectOutputStream out = new ObjectOutputStream(byteStream)) {
+            
+            out.writeObject(m);
+            out.flush();
+            byte[] buffer = byteStream.toByteArray();
+
             DatagramPacket packet = new DatagramPacket(
-                data, data.length, InetAddress.getByName(member.ip), member.port);
-            socket.send(packet);
+                buffer, buffer.length, InetAddress.getByName(member.ip), member.port);
+            
+            try (DatagramSocket socket = new DatagramSocket()) {
+                socket.send(packet);
+            }
         } catch (Exception e) { /* ignore */ }
     }
 
@@ -381,7 +395,8 @@ public class StableMulticast {
         public String toString() { return ip + ":" + port; }
     }
 
-    private static class Message {
+    private static class Message implements Serializable {
+        private static final long serialVersionUID = 1L;
         String senderIp;
         int senderPort;
         int[] vector; 
@@ -392,30 +407,6 @@ public class StableMulticast {
             this.senderPort = port;
             this.vector = vector;
             this.msg = msg;
-        }
-
-        byte[] toBytes() {
-            // Serializa: ip:port|v0,v1,v2,...|msg
-            StringBuilder sb = new StringBuilder();
-            sb.append(senderIp).append(":").append(senderPort).append("|");
-            for (int i = 0; i < vector.length; i++) {
-                sb.append(vector[i]);
-                if (i < vector.length - 1) sb.append(",");
-            }
-            sb.append("|").append(msg);
-            return sb.toString().getBytes();
-        }
-
-        static Message fromBytes(byte[] data, int len) {
-            try {
-                String s = new String(data, 0, len);
-                String[] parts = s.split("\\|");
-                String[] ipPort = parts[0].split(":");
-                String[] vparts = parts[1].split(",");
-                int[] vector = new int[vparts.length];
-                for (int i = 0; i < vparts.length; i++) vector[i] = Integer.parseInt(vparts[i]);
-                return new Message(ipPort[0], Integer.parseInt(ipPort[1]), vector, parts[2]);
-            } catch (Exception e) { return null; }
         }
     }
 }

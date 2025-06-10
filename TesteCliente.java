@@ -1,5 +1,7 @@
 import StableMulticast.*;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Scanner;
 
 public class TesteCliente implements IStableMulticast {
@@ -26,13 +28,13 @@ public class TesteCliente implements IStableMulticast {
         sc.close();
     }
 
-    public static void main(String[] args) {
-        if (args.length < 2) {
+    public static void main(String[] args) throws UnknownHostException {
+        if (args.length < 1) {
             System.out.println("Uso: java TesteCliente <ip_local> <porta_local>");
             return;
         }
-        String ip = args[0];
-        int port = Integer.parseInt(args[1]);
+        String ip = InetAddress.getLocalHost().getHostAddress();
+        int port = Integer.parseInt(args[0]);
         TesteCliente cliente = new TesteCliente(ip, port);
         cliente.start();
     }
