@@ -16,7 +16,6 @@ public class StableMulticast {
     private final IStableMulticast client;
 
     private final Set<Member> group = ConcurrentHashMap.newKeySet();
-    private final Map<String, int[]> vectorClocks = new ConcurrentHashMap<>();
     private final List<Message> buffer = Collections.synchronizedList(new ArrayList<>());
 
     private int[][] localMatrix;
@@ -43,21 +42,6 @@ public class StableMulticast {
     }
 
     public void msend(String msg, IStableMulticast client) {
-        // Verifica se há apenas um membro (o próprio processo)
-        List<Member> otherMembers = new ArrayList<>();
-        for (Member member : group) {
-            if (!member.equals(new Member(localIp, localPort))) {
-                otherMembers.add(member);
-            }
-        }
-        
-        if (otherMembers.isEmpty()) {
-            System.out.println("Apenas um membro no grupo. Relógio lógico permanece zerado e buffer vazio.");
-            // Não incrementa o relógio lógico nem adiciona ao buffer
-            printState();
-            return;
-        }
-
         int[] myRow = Arrays.copyOf(localMatrix[memberIndex], localMatrix.length);
         Message m = new Message(localIp, localPort, myRow, msg);
 
@@ -65,18 +49,23 @@ public class StableMulticast {
 
         printState();
 
+        List<Member> memberList = new ArrayList<>(group);
+        if (memberList.isEmpty()) {
+            System.out.println("Nenhum membro para enviar.");
+            return;
+        }
         System.out.println("Enviar mensagem para TODOS os membros? (s/n)");
         String opt = scanner.nextLine().trim().toLowerCase();
         if (opt.equals("s")) {
-            for (Member member : otherMembers) {
+            for (Member member : memberList) {
                 sendUnicastWithPrompt(member, m, false);
             }
         } else {
             Set<Member> enviados = new HashSet<>();
-            while (enviados.size() < otherMembers.size()) {
+            while (enviados.size() < memberList.size()) {
                 System.out.println("Membros disponíveis:");
-                for (int i = 0; i < otherMembers.size(); i++) {
-                    Member mem = otherMembers.get(i);
+                for (int i = 0; i < memberList.size(); i++) {
+                    Member mem = memberList.get(i);
                     if (!enviados.contains(mem)) {
                         System.out.println(i + ": " + mem);
                     }
@@ -86,11 +75,11 @@ public class StableMulticast {
                 if (entrada.equalsIgnoreCase("fim")) break;
                 try {
                     int idx = Integer.parseInt(entrada);
-                    if (idx >= 0 && idx < otherMembers.size() && !enviados.contains(otherMembers.get(idx))) {
-                        sendUnicastWithPrompt(otherMembers.get(idx), m, true);
-                        enviados.add(otherMembers.get(idx));
+                    if (idx >= 0 && idx < memberList.size() && !enviados.contains(memberList.get(idx))) {
+                        sendUnicastWithPrompt(memberList.get(idx), m, true);
+                        enviados.add(memberList.get(idx));
                     } else {
-                        System.out.println("Indice inválido ou já enviado.");
+                        System.out.println("Índice inválido ou já enviado.");
                     }
                 } catch (NumberFormatException e) {
                     System.out.println("Entrada inválida.");
@@ -314,21 +303,6 @@ public class StableMulticast {
         }
     }
 
-    private void tryDeliver() {
-        synchronized (buffer) {
-            Iterator<Message> it = buffer.iterator();
-            while (it.hasNext()) {
-                Message m = it.next();
-                if (isDeliverable(m)) {
-                    client.deliver(m.msg);
-                    updateVector(m);
-                    it.remove();
-                    printState();
-                }
-            }
-        }
-    }
-
     private void printState() {
         System.out.println("=== ESTADO ATUAL ===");
         System.out.println("Matriz de relógios lógicos:");
@@ -345,20 +319,6 @@ public class StableMulticast {
         System.out.println("====================");
     }
 
-    private boolean isDeliverable(Message m) {
-        int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
-        if (senderIdx == -1) return false;
-        for (int k = 0; k < localMatrix.length; k++) {
-            if (k == senderIdx) continue;
-            if (localMatrix[memberIndex][k] < m.vector[k]) {
-                return false;
-            }
-        }
-        if (localMatrix[memberIndex][senderIdx] != m.vector[senderIdx] - 1) {
-            return false;
-        }
-    return true;
-}
 
     private void updateVector(Message m) {
         int senderIdx = getMemberIndex(m.senderIp, m.senderPort);
